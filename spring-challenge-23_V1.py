@@ -34,8 +34,7 @@ class Cell:
 
 board = {}
 
-# Auto-generated code below aims at helping you parse
-# the standard input according to the problem statement.
+# Process firsts inputs
 
 number_of_cells = int(input())  # amount of hexagonal cells in this map
 for i in range(number_of_cells):
@@ -54,36 +53,98 @@ bases = [board[int(i)] for i in  input().split()]
 for i in input().split():
     opp_base_index = int(i)
 
-scores = []
 
-def compute_scores(cell, back_cell, path = None):
+# Try to build matrix of the sortests paths between each cell
+# (we have 1sec for the first run)
 
-    if path is None:
-        path = [cell]
+def shortest_path(cell_a, cell_b, board):
+
+    for cell in board.values():
+        cell._ddist = 1000
+
+    cell_a._ddist = 0
     
-    if len(path) > 14:
-        return
+    path = [cell_a]
+    path_found = False
 
-    neighs = [neigh for neigh in cell.neighs if neigh not in path]
-    cell.closed = True
+    def add_to_path(cell):
+        nonlocal path
+        
+        for i, c in enumerate(path):
+            if cell._ddist < c._ddist:
+                path.insert(i, cell)
 
-    for neigh in neighs:
-        if neigh.resources > 0:
-            # we stop this path
-            comp = path[:]
-            comp.append(neigh)
-            scores.append(comp)
-        else:
-            #
-            path.append(neigh)
-            compute_scores(neigh, cell, path[:])
+        path.append(cell)
+
+    def compute():
+        nonlocal path, path_found
+
+        if len(path) == 0:
+            path_found = True
+            return
+
+        current = path.pop(0)
+
+        if current is cell_b:
+            # debug("STOP", len(path))
+            path_found = True
+            path = [current]
+            while current is not cell_a:
+                # debug(cell_a.index, current.index)
+                path.insert(0, current.path_to)
+                current = current.path_to
+            return
+
+
+        c_ddist = current._ddist + 1
+        # debug("CURR %d %d c_dist %d" % (current.index, current._ddist, c_ddist))
+        
+        for neigh in current.neighs:
+            if neigh._ddist > c_ddist:
+                # debug("> neigh %d dist %d" % (neigh.index, neigh._ddist))
+                neigh._ddist = c_ddist
+                neigh.path_to = current
+                if neigh in path:
+                    # debug('IN PATH')
+                    path.sort(key=attrgetter("_ddist"), reverse=True)
+                else:
+                    add_to_path(neigh)
+                # debug(list(map(attrgetter('index'), path)))
+        #     else:
+        #         debug("< neigh %d dist %d" % (neigh.index, neigh._ddist))
+        # debug(list(map(attrgetter('index'), path)))
+
+
+    while not path_found:
+        compute()
+
+    return path
+
+# grid_path = []
+# cells = board.values()
+
+# cell_a = board[55]
+# cell_b = board[0]
+# test = shortest_path(cell_a, cell_b, board)
+# debug("Shortest %d %d -> %d" % (cell_a.index, cell_b.index, len(test)))
+# debug(list(map(attrgetter('index'), test)))
+# for cell in cells:
+#     shortest_path
+# raise Exception("ARG !")
+
 
 
 # game loop
 while True:
+    game_scores = input().split()
     actions = []
     total_ants = 0
+    
     total_resources = 0
+    total_res_ants = 0
+    total_res_crys = 0
+
+
     for i in range(number_of_cells):
         # resources: the current amount of eggs/crystals on this cell
         # my_ants: the amount of your ants on this cell
@@ -102,39 +163,43 @@ while True:
         total_ants+= my_ants
         total_resources+= resources
 
-    # debug("ANTS", total_ants)
+        if cell._type == 1:
+            total_res_ants+= resources
+        else:
+            total_res_crys+= resources
 
-    # compute_scores(bases[0], bases[0])
+
+    # debug("ANTS", total_ants)
 
     for cell in board.values():
         cell.compute_res_around()
 
-    t = time.time()
-    all_scores = []
+    time_start = time.time()
+    
+    sh_paths = {}
+    resource_cells = [c for c in board.values() if c.resources > 0]
+    
+    # Find shortest paths between bases and resources
     for base in bases:
-        scores = []
-        compute_scores(base, base)
-        all_scores+= scores
+        for target_cell in resource_cells:
+            path = shortest_path(base, target_cell, board)
+            # unique path per resource (ex. two bases can't target same rez)
+            if target_cell in sh_paths and len(path) > len(sh_paths[target_cell]):
+                continue
 
-    debug("Compute scores time", time.time() - t)
-
-    filtered = {}
-    for path in all_scores:
-        key = (path[0], path[-1])
-        cmp = filtered.get(key, None)
-        if cmp is None or len(path) < len(cmp):
-            filtered[key] = path
-
-    all_scores = filtered.values()
+            sh_paths[target_cell] = path
 
     def path_score(path):
+        # return len(path)
         return len(path) * path[-1]._type**2
 
-    all_scores = sorted(all_scores, key=path_score, reverse=False)
+    all_scores = sorted(sh_paths.values(), key=path_score, reverse=False)
+    
+    debug("Paths & scores compute time %.3fs " % (time.time() - time_start))
     debug(list(map(path_score, all_scores)))
 
     total_strength = 0
-    
+
     strength = 1
 
     for path in all_scores:
@@ -142,7 +207,12 @@ while True:
         s_cell = path[0]
         e_cell = path[-1]
 
-        actions.append("LINE %d %d %d" % (s_cell.index, e_cell.index, strength))
+        for cell in path:
+            # b_s = 2 if cell._type == 1 else 1
+            b_s = 1
+            actions.append("BEACON %d %d" % (cell.index, b_s))
+
+        # actions.append("LINE %d %d %d" % (s_cell.index, e_cell.index, strength))
         total_strength+= l * .9
 
         if total_ants / 2 < total_strength:
